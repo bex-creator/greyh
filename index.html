@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Debian Desktop</title>
-    <!-- v86 Engine from CDN -->
+    <!-- Load v86 Engine from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/v86@latest/build/libv86.js"></script>
     <style>
         body { 
@@ -28,7 +28,7 @@
             height: 768px;
             border: 2px solid #444;
             background: #000;
-            display: none; /* Stays hidden until ISO is selected */
+            display: none;
         }
         canvas { width: 100%; height: 100%; cursor: none; }
         input[type="file"] { margin-top: 15px; font-size: 15px; }
@@ -39,7 +39,7 @@
 
     <div id="setup_box">
         <h3>Load Local Operating System</h3>
-        <p>Select the Debian ISO file downloaded on your Chromebook to boot:</p>
+        <p>Select your downloaded Debian Live ISO from your Chromebook:</p>
         <input type="file" id="iso_picker" accept=".iso">
     </div>
 
@@ -53,14 +53,13 @@
             const file = e.target.files[0];
             if (!file) return;
 
-            // Hide upload box and display virtual screen
+            // Hide setup UI and reveal the VM display
             document.getElementById('setup_box').style.display = 'none';
             document.getElementById('screen_container').style.display = 'block';
 
-            // Create local browser link to the selected ISO
+            // Point v86 directly to the local file selected on your disk
             const localIsoUrl = URL.createObjectURL(file);
 
-            // Initialize v86 VM
             const emulator = new window.V86({
                 wasm_path: "https://cdn.jsdelivr.net/npm/v86@latest/build/v86.wasm",
                 memory_size: 1024 * 1024 * 1024, // 1GB RAM
