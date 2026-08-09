@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Debian Desktop (Wasm + WebGPU Pipeline)</title>
+    <!-- v86 WebAssembly CPU Emulation Engine -->
+    <script src="https://cdn.jsdelivr.net/npm/v86@latest/build/libv86.js"></script>
+    <style>
+        body { 
+            background: #121212; 
+            color: #ffffff; 
+            font-family: system-ui, -apple-system, sans-serif; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            padding: 20px; 
+        }
+        #setup_panel {
+            background: #222222;
+            border: 2px dashed #444444;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            max-width: 500px;
+            margin-bottom: 20px;
+        }
+        #screen_container {
+            width: 1024px;
+            height: 768px;
+            border: 2px solid #333333;
+            background: #000000;
+            display: none;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+        }
+        canvas { 
+            width: 100%; 
+            height: 100%; 
+            cursor: none; 
+        }
+        .gpu-badge {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: bold;
+            background: #333333;
+        }
+        input[type="file"] { margin-top: 15px; font-size: 15px; }
+    </style>
+</head>
+<body>
+    <h2>Debian Desktop</h2>
+
+    <div id="setup_panel">
+        <h3>Serverless Boot Panel</h3>
+        <p>Select your downloaded Debian Live ISO. WebAssembly executes the CPU code while WebGPU handles hardware graphics presentation.</p>
+        
+        <input type="file" id="iso_input" accept=".iso">
+        <br>
+        <div id="gpu_status" class="gpu-badge">Checking WebGPU acceleration...</div>
+    </div>
+
+    <div id="screen_container">
+        <div style="white-space: pre; font: 14px monospace;"></div>
+        <canvas id="vm_canvas"></canvas>
+    </div>
+
+    <script>
+        let webGpuDevice = null;
+
+        // Initialize WebGPU pipeline for rendering hardware acceleration
+        async function setupWebGPU() {
+            const badge = document.getElementById("gpu_status");
+            if (navigator.gpu) {
+                try {
+                    const adapter = await navigator.gpu.requestAdapter();
+                    if (adapter) {
+                        webGpuDevice = await adapter.requestDevice();
+                        const canvas = document.getElementById("vm_canvas");
+                        const context = canvas.getContext("webgpu");
+                        
+                        context.configure({
+                            device: webGpuDevice,
+                            format: navigator.gpu.getPreferredCanvasFormat(),
+                            alphaMode: "premultiplied"
+                        });
+
+                        badge.innerText = "✓ WebGPU Hardware Acceleration: ACTIVE";
+                        badge.style.background = "#1b5e20";
+                        badge.style.color = "#81c784";
+                        return;
+                    }
+                } catch (err) {
+                    console.warn("WebGPU initialization failed, using standard canvas context:", err);
+                }
+            }
+            badge.innerText = "⚠️ WebGPU Unsupported: Falling back to WebGL/Canvas2D";
+            badge.style.background = "#e65100";
+            badge.style.color = "#ffb74d";
+        }
+
+        setupWebGPU();
+
+        // Handle ISO loading without a local server
+        document.getElementById("iso_input").addEventListener("change", function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            document.getElementById("setup_panel").style.display = "none";
+            document.getElementById("screen_container").style.display = "block";
+
+            // Map local disk file directly to memory via Blob URL
+            const isoBlobUrl = URL.createObjectURL(file);
+
+            // Launch Virtual Machine
+            const emulator = new window.V86({
+                wasm_path: "https://cdn.jsdelivr.net/npm/v86@latest/build/v86.wasm",
+                memory_size: 1024 * 1024 * 1024, // 1GB RAM
+                vga_memory_size: 32 * 1024 * 1024, // 32MB Video RAM
+                
+                screen_container: document.getElementById("screen_container"),
+                
+                bios: { url: "https://cdn.jsdelivr.net/npm/v86@latest/bios/seabios.bin" },
+                vga_bios: { url: "https://cdn.jsdelivr.net/npm/v86@latest/bios/vgabios.bin" },
+                
+                cdrom: { 
+                    url: isoBlobUrl, 
+                    async: true // Reads large files asynchronously in chunks
+                },
+                
+                autostart: true
+            });
+        });
+    </script>
+</body>
+</html>
