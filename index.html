@@ -23,6 +23,32 @@
             margin-bottom: 20px;
             text-align: center;
         }
+        #loading_box {
+            display: none;
+            width: 400px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        #progress_bar_container {
+            width: 100%;
+            height: 18px;
+            background-color: #333;
+            border-radius: 9px;
+            overflow: hidden;
+            border: 1px solid #555;
+            margin-top: 10px;
+        }
+        #progress_bar {
+            width: 0%;
+            height: 100%;
+            background-color: #3b82f6;
+            transition: width 0.2s ease;
+        }
+        #status_text {
+            font-size: 14px;
+            color: #ccc;
+            margin-top: 8px;
+        }
         #screen_container {
             width: 1024px;
             height: 768px;
@@ -43,6 +69,14 @@
         <input type="file" id="iso_file" accept=".iso">
     </div>
 
+    <!-- Loading Bar UI -->
+    <div id="loading_box">
+        <div id="status_text">Loading WebAssembly & BIOS assets...</div>
+        <div id="progress_bar_container">
+            <div id="progress_bar"></div>
+        </div>
+    </div>
+
     <div id="screen_container">
         <div style="white-space: pre; font: 14px monospace;"></div>
         <canvas></canvas>
@@ -53,19 +87,26 @@
             const file = e.target.files[0];
             if (!file) return;
 
-            document.getElementById('controls').style.display = 'none';
-            document.getElementById('screen_container').style.display = 'block';
+            // UI Elements
+            const controls = document.getElementById('controls');
+            const loadingBox = document.getElementById('loading_box');
+            const progressBar = document.getElementById('progress_bar');
+            const statusText = document.getElementById('status_text');
+            const screenContainer = document.getElementById('screen_container');
+
+            // Hide file picker, show loading bar
+            controls.style.display = 'none';
+            loadingBox.style.display = 'block';
 
             const localIsoUrl = URL.createObjectURL(file);
 
             const emulator = new window.V86({
                 wasm_path: "https://cdn.jsdelivr.net/npm/v86@latest/build/v86.wasm",
                 
-                // Reduced to 512MB to prevent 1.3GB ISOs from crashing Chrome's tab memory limit
                 memory_size: 512 * 1024 * 1024, 
                 vga_memory_size: 16 * 1024 * 1024,
                 
-                screen_container: document.getElementById("screen_container"),
+                screen_container: screenContainer,
                 
                 bios: { url: "https://cdn.jsdelivr.net/npm/v86@latest/bios/seabios.bin" },
                 vga_bios: { url: "https://cdn.jsdelivr.net/npm/v86@latest/bios/vgabios.bin" },
@@ -77,6 +118,39 @@
                 
                 autostart: true
             });
+
+            // Track WASM & BIOS asset downloads
+            emulator.add_listener("download-progress", function(progress) {
+                if (progress.lengthComputable || (progress.loaded && progress.total)) {
+                    const percent = Math.round((progress.loaded / progress.total) * 100);
+                    progressBar.style.width = percent + "%";
+                    statusText.innerText = "Downloading assets... " + percent + "%";
+                } else {
+                    progressBar.style.width = "50%";
+                    statusText.innerText = "Loading system assets into RAM...";
+                }
+            });
+
+            // Update status when VM starts executing CPU instructions
+            emulator.add_listener("emulator-ready", function() {
+                progressBar.style.width = "90%";
+                statusText.innerText = "Initializing WebAssembly CPU & mounting ISO...";
+            });
+
+            // Once the display outputs its first screen update, hide loader and reveal display
+            const onFirstFrame = function() {
+                progressBar.style.width = "100%";
+                statusText.innerText = "Boot sequence started!";
+                
+                setTimeout(() => {
+                    loadingBox.style.display = 'none';
+                    screenContainer.style.display = 'block';
+                }, 300);
+
+                emulator.remove_listener("screen-fill-rect", onFirstFrame);
+            };
+
+            emulator.add_listener("screen-fill-rect", onFirstFrame);
         });
     </script>
 </body>
