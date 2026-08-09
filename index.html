@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Debian Desktop</title>
-    <!-- Load v86 Engine from CDN -->
+    <!-- Load v86 WebAssembly Engine -->
     <script src="https://cdn.jsdelivr.net/npm/v86@latest/build/libv86.js"></script>
     <style>
         body { 
@@ -15,13 +15,13 @@
             align-items: center; 
             padding: 20px; 
         }
-        #setup_box {
+        #controls {
             background: #222;
             border: 2px dashed #555;
+            padding: 20px;
             border-radius: 8px;
-            padding: 25px;
-            text-align: center;
             margin-bottom: 20px;
+            text-align: center;
         }
         #screen_container {
             width: 1024px;
@@ -31,16 +31,16 @@
             display: none;
         }
         canvas { width: 100%; height: 100%; cursor: none; }
-        input[type="file"] { margin-top: 15px; font-size: 15px; }
+        input[type="file"] { margin-top: 12px; font-size: 15px; }
     </style>
 </head>
 <body>
     <h2>Debian Desktop</h2>
 
-    <div id="setup_box">
-        <h3>Load Local Operating System</h3>
-        <p>Select your downloaded Debian Live ISO from your Chromebook:</p>
-        <input type="file" id="iso_picker" accept=".iso">
+    <div id="controls">
+        <h3>Select Your Linux ISO</h3>
+        <p>Choose your downloaded ISO file to boot:</p>
+        <input type="file" id="iso_file" accept=".iso">
     </div>
 
     <div id="screen_container">
@@ -49,21 +49,21 @@
     </div>
 
     <script>
-        document.getElementById('iso_picker').addEventListener('change', function(e) {
+        document.getElementById('iso_file').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
 
-            // Hide setup UI and reveal the VM display
-            document.getElementById('setup_box').style.display = 'none';
+            document.getElementById('controls').style.display = 'none';
             document.getElementById('screen_container').style.display = 'block';
 
-            // Point v86 directly to the local file selected on your disk
             const localIsoUrl = URL.createObjectURL(file);
 
             const emulator = new window.V86({
                 wasm_path: "https://cdn.jsdelivr.net/npm/v86@latest/build/v86.wasm",
-                memory_size: 1024 * 1024 * 1024, // 1GB RAM
-                vga_memory_size: 32 * 1024 * 1024,
+                
+                // Reduced to 512MB to prevent 1.3GB ISOs from crashing Chrome's tab memory limit
+                memory_size: 512 * 1024 * 1024, 
+                vga_memory_size: 16 * 1024 * 1024,
                 
                 screen_container: document.getElementById("screen_container"),
                 
