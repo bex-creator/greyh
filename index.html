@@ -2,155 +2,136 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Debian Desktop</title>
-    <!-- Load v86 WebAssembly Engine -->
-    <script src="https://cdn.jsdelivr.net/npm/v86@latest/build/libv86.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>In-Browser Linux Workspace</title>
     <style>
-        body { 
-            background: #121212; 
-            color: #ffffff; 
-            font-family: sans-serif; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            padding: 20px; 
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
-        #controls {
-            background: #222;
-            border: 2px dashed #555;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-        #loading_box {
-            display: none;
-            width: 400px;
-            text-align: center;
-            margin-bottom: 20px;
-        }
-        #progress_bar_container {
-            width: 100%;
-            height: 18px;
-            background-color: #333;
-            border-radius: 9px;
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
             overflow: hidden;
-            border: 1px solid #555;
+        }
+        #viewport-container {
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            cursor: crosshair;
+            background-color: #000;
+        }
+        #status {
             margin-top: 10px;
-        }
-        #progress_bar {
-            width: 0%;
-            height: 100%;
-            background-color: #3b82f6;
-            transition: width 0.2s ease;
-        }
-        #status_text {
             font-size: 14px;
-            color: #ccc;
-            margin-top: 8px;
+            color: #888;
         }
-        #screen_container {
-            width: 1024px;
-            height: 768px;
-            border: 2px solid #444;
-            background: #000;
-            display: none;
-        }
-        canvas { width: 100%; height: 100%; cursor: none; }
-        input[type="file"] { margin-top: 12px; font-size: 15px; }
     </style>
 </head>
 <body>
-    <h2>Debian Desktop</h2>
 
-    <div id="controls">
-        <h3>Select Your Linux ISO</h3>
-        <p>Choose your downloaded ISO file to boot:</p>
-        <input type="file" id="iso_file" accept=".iso">
+    <div id="viewport-container">
+        <canvas id="displayCanvas" width="1280" height="720"></canvas>
     </div>
-
-    <!-- Loading Bar UI -->
-    <div id="loading_box">
-        <div id="status_text">Loading WebAssembly & BIOS assets...</div>
-        <div id="progress_bar_container">
-            <div id="progress_bar"></div>
-        </div>
-    </div>
-
-    <div id="screen_container">
-        <div style="white-space: pre; font: 14px monospace;"></div>
-        <canvas></canvas>
-    </div>
+    <div id="status">Connecting to remote Linux session...</div>
 
     <script>
-        document.getElementById('iso_file').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
+        const canvas = document.getElementById('displayCanvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
 
-            // UI Elements
-            const controls = document.getElementById('controls');
-            const loadingBox = document.getElementById('loading_box');
-            const progressBar = document.getElementById('progress_bar');
-            const statusText = document.getElementById('status_text');
-            const screenContainer = document.getElementById('screen_container');
+        // Initialize WebSocket Connection
+        const socket = new WebSocket('ws://' + window.location.hostname + ':8080');
+        socket.binaryType = 'arraybuffer';
 
-            // Hide file picker, show loading bar
-            controls.style.display = 'none';
-            loadingBox.style.display = 'block';
+        let frameBuffer = [];
 
-            const localIsoUrl = URL.createObjectURL(file);
+        socket.onopen = () => {
+            statusDiv.textContent = 'Connected | Click canvas to capture input';
+            statusDiv.style.color = '#4CAF50';
+        };
 
-            const emulator = new window.V86({
-                wasm_path: "https://cdn.jsdelivr.net/npm/v86@latest/build/v86.wasm",
-                
-                memory_size: 512 * 1024 * 1024, 
-                vga_memory_size: 16 * 1024 * 1024,
-                
-                screen_container: screenContainer,
-                
-                bios: { url: "https://cdn.jsdelivr.net/npm/v86@latest/bios/seabios.bin" },
-                vga_bios: { url: "https://cdn.jsdelivr.net/npm/v86@latest/bios/vgabios.bin" },
-                
-                cdrom: { 
-                    url: localIsoUrl, 
-                    async: true 
-                },
-                
-                autostart: true
-            });
+        socket.onclose = () => {
+            statusDiv.textContent = 'Disconnected from Linux session';
+            statusDiv.style.color = '#F44336';
+        };
 
-            // Track WASM & BIOS asset downloads
-            emulator.add_listener("download-progress", function(progress) {
-                if (progress.lengthComputable || (progress.loaded && progress.total)) {
-                    const percent = Math.round((progress.loaded / progress.total) * 100);
-                    progressBar.style.width = percent + "%";
-                    statusText.innerText = "Downloading assets... " + percent + "%";
-                } else {
-                    progressBar.style.width = "50%";
-                    statusText.innerText = "Loading system assets into RAM...";
-                }
-            });
+        // Render binary frame stream onto HTML5 Canvas
+        socket.onmessage = (event) => {
+            if (event.data instanceof ArrayBuffer) {
+                const blob = new Blob([event.data], { type: 'image/jpeg' });
+                const img = new Image();
+                img.onload = () => {
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    URL.revokeObjectURL(img.src);
+                };
+                img.src = URL.createObjectURL(blob);
+            }
+        };
 
-            // Update status when VM starts executing CPU instructions
-            emulator.add_listener("emulator-ready", function() {
-                progressBar.style.width = "90%";
-                statusText.innerText = "Initializing WebAssembly CPU & mounting ISO...";
-            });
+        // Send JSON formatted input actions to the Linux backend
+        function sendInput(data) {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(data));
+            }
+        }
 
-            // Once the display outputs its first screen update, hide loader and reveal display
-            const onFirstFrame = function() {
-                progressBar.style.width = "100%";
-                statusText.innerText = "Boot sequence started!";
-                
-                setTimeout(() => {
-                    loadingBox.style.display = 'none';
-                    screenContainer.style.display = 'block';
-                }, 300);
-
-                emulator.remove_listener("screen-fill-rect", onFirstFrame);
+        // Pointer event interception
+        function getCanvasCoordinates(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: Math.round((e.clientX - rect.left) * scaleX),
+                y: Math.round((e.clientY - rect.top) * scaleY)
             };
+        }
 
-            emulator.add_listener("screen-fill-rect", onFirstFrame);
+        canvas.addEventListener('mousemove', (e) => {
+            const coords = getCanvasCoordinates(e);
+            sendInput({ type: 'mousemove', x: coords.x, y: coords.y });
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            // Map JavaScript mouse buttons to X11 buttons (1=Left, 2=Middle, 3=Right)
+            const buttonMap = { 0: 1, 1: 2, 2: 3 };
+            sendInput({ type: 'mousedown', button: buttonMap[e.button] || 1 });
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            const buttonMap = { 0: 1, 1: 2, 2: 3 };
+            sendInput({ type: 'mouseup', button: buttonMap[e.button] || 1 });
+        });
+
+        // Prevent standard right-click context menu over the desktop canvas
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        // Keyboard event interception
+        window.addEventListener('keydown', (e) => {
+            // Capture events only if focusing canvas
+            if (document.activeElement === canvas || document.activeElement === document.body) {
+                // Prevent browser standard shortcuts (e.g., Ctrl+S, Tab navigation)
+                e.preventDefault();
+                sendInput({ type: 'keydown', key: e.key });
+            }
+        });
+
+        // Request System Keyboard Lock API (Chromium-based browsers)
+        canvas.addEventListener('click', () => {
+            if ('keyboard' in navigator && 'lock' in navigator.keyboard) {
+                navigator.keyboard.lock(["ControlLeft", "KeyW", "Tab", "AltLeft"]).catch(console.error);
+            }
         });
     </script>
 </body>
