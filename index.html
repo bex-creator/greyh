@@ -2,137 +2,191 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>In-Browser Linux Workspace</title>
+    <title>Python WASM Directory Sandbox</title>
+    <!-- Load Pyodide WASM Runtime Layer -->
+    <script src="https://jsdelivr.net"></script>
     <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
         body {
-            background-color: #121212;
-            color: #ffffff;
-            font-family: Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            overflow: hidden;
+            margin: 0; padding: 20px;
+            background-color: #121214; color: #e1e1e6;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
-        #viewport-container {
-            position: relative;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            border-radius: 4px;
-            overflow: hidden;
+        #sandbox-wrapper {
+            max-width: 900px; margin: 0 auto;
         }
-        canvas {
-            display: block;
-            cursor: crosshair;
-            background-color: #000;
+        header h1 { margin-bottom: 5px; color: #ffca28; }
+        header p { color: #a4a4a4; margin-top: 0; }
+
+        #drop-zone {
+            border: 3px dashed #44475a; border-radius: 8px;
+            padding: 60px 20px; text-align: center;
+            background: #1d1f27; cursor: pointer;
+            transition: all 0.2s ease-in-out;
         }
-        #status {
-            margin-top: 10px;
-            font-size: 14px;
-            color: #888;
+        #drop-zone.hovering {
+            border-color: #ffca28; background: #282a36;
+        }
+        .prompt-content .icon { font-size: 3rem; display: block; margin-bottom: 10px; }
+        .prompt-content p { font-size: 1.2rem; margin: 0; font-weight: bold; }
+
+        #status-message {
+            margin: 20px 0; font-weight: bold; color: #ffb86c; font-family: monospace;
+        }
+
+        .terminal-container {
+            background: #000; border-radius: 6px; padding: 15px;
+            border: 1px solid #333; box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+        }
+        .terminal-container h3 { margin-top: 0; color: #8be9fd; font-size: 0.9rem; text-transform: uppercase; }
+        #console-output {
+            margin: 0; white-space: pre-wrap; word-wrap: break-word;
+            font-family: 'Courier New', Courier, monospace; color: #f8f8f2; font-size: 0.95rem;
+            max-height: 400px; overflow-y: auto;
         }
     </style>
 </head>
 <body>
+    <div id="sandbox-wrapper">
+        <header>
+            <h1>🐍 Python Local Folder Sandbox</h1>
+            <p>Drag an entire development folder containing your <code>main.py</code> and assets below.</p>
+        </header>
 
-    <div id="viewport-container">
-        <canvas id="displayCanvas" width="1280" height="720"></canvas>
+        <!-- Drag & Drop Interface Target -->
+        <div id="drop-zone">
+            <div class="prompt-content">
+                <span class="icon">📁</span>
+                <p>Drop your project folder here</p>
+                <small>(Must contain a <code>main.py</code> file)</small>
+            </div>
+        </div>
+
+        <div id="status-message">Initializing WebAssembly Machine...</div>
+
+        <!-- Terminal Output View -->
+        <div class="terminal-container">
+            <h3>Terminal Output:</h3>
+            <pre id="console-output"></pre>
+        </div>
     </div>
-    <div id="status">Connecting to remote Linux session...</div>
 
     <script>
-        const canvas = document.getElementById('displayCanvas');
-        const ctx = canvas.getContext('2d');
-        const statusDiv = document.getElementById('status');
+        let pyodideInstance = null;
+        const outputConsole = document.getElementById('console-output');
+        const statusLabel = document.getElementById('status-message');
+        const dropTarget = document.getElementById('drop-zone');
 
-        // Initialize WebSocket Connection
-        const socket = new WebSocket('ws://' + window.location.hostname + ':8080');
-        socket.binaryType = 'arraybuffer';
-
-        let frameBuffer = [];
-
-        socket.onopen = () => {
-            statusDiv.textContent = 'Connected | Click canvas to capture input';
-            statusDiv.style.color = '#4CAF50';
-        };
-
-        socket.onclose = () => {
-            statusDiv.textContent = 'Disconnected from Linux session';
-            statusDiv.style.color = '#F44336';
-        };
-
-        // Render binary frame stream onto HTML5 Canvas
-        socket.onmessage = (event) => {
-            if (event.data instanceof ArrayBuffer) {
-                const blob = new Blob([event.data], { type: 'image/jpeg' });
-                const img = new Image();
-                img.onload = () => {
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    URL.revokeObjectURL(img.src);
-                };
-                img.src = URL.createObjectURL(blob);
-            }
-        };
-
-        // Send JSON formatted input actions to the Linux backend
-        function sendInput(data) {
-            if (socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify(data));
+        // 1. Boot up the WebAssembly Python environment
+        async function initSandboxEngine() {
+            try {
+                pyodideInstance = await loadPyodide({
+                    stdout: (text) => { outputConsole.textContent += text + '\n'; },
+                    stderr: (text) => { outputConsole.textContent += '[ERROR] ' + text + '\n'; }
+                });
+                statusLabel.innerText = "System Ready. Please drop your directory folder.";
+                statusLabel.style.color = "#00ff00";
+            } catch (err) {
+                statusLabel.innerText = "WASM Initialization Failed.";
+                console.error(err);
             }
         }
 
-        // Pointer event interception
-        function getCanvasCoordinates(e) {
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            return {
-                x: Math.round((e.clientX - rect.left) * scaleX),
-                y: Math.round((e.clientY - rect.top) * scaleY)
-            };
+        // 2. Prevent default OS actions on browser drops
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropTarget.addEventListener(eventName, (e) => e.preventDefault(), false);
+        });
+
+        dropTarget.addEventListener('dragover', () => dropTarget.classList.add('hovering'));
+        dropTarget.addEventListener('dragleave', () => dropTarget.classList.remove('hovering'));
+
+        dropTarget.addEventListener('drop', async (e) => {
+            dropTarget.classList.remove('hovering');
+            if (!pyodideInstance) return;
+
+            outputConsole.textContent = ""; // Clear log frames
+            statusLabel.innerText = "Reading file tree assets...";
+            
+            // Snag dropped items using the DataTransfer API
+            const items = e.dataTransfer.items;
+            if (items && items.length > 0) {
+                const entry = items[0].webkitGetAsEntry();
+                if (entry.isDirectory) {
+                    await clearVirtualFileSystem();
+                    await scanAndInjectDirectory(entry, "/");
+                    runPythonExecution();
+                } else {
+                    statusLabel.innerText = "Error: Please drop a folder directory, not a lone file.";
+                }
+            }
+        });
+
+        // Helper to wipe the workspace inside Pyodide before new execution cycles
+        async function clearVirtualFileSystem() {
+            const existingFiles = pyodideInstance.FS.readdir('/');
+            existingFiles.forEach(file => {
+                if (file !== '.' && file !== '..') {
+                    try {
+                        // Wipe transient files out of memory root mapping
+                        pyodideInstance.FS.unlink('/' + file);
+                    } catch(e) {}
+                }
+            });
         }
 
-        canvas.addEventListener('mousemove', (e) => {
-            const coords = getCanvasCoordinates(e);
-            sendInput({ type: 'mousemove', x: coords.x, y: coords.y });
-        });
+        // 3. Recursive directory mapping handler
+        async function scanAndInjectDirectory(dirEntry, currentPath) {
+            const dirReader = dirEntry.createReader();
+            const entries = await new Promise((resolve) => dirReader.readEntries(resolve));
 
-        canvas.addEventListener('mousedown', (e) => {
-            // Map JavaScript mouse buttons to X11 buttons (1=Left, 2=Middle, 3=Right)
-            const buttonMap = { 0: 1, 1: 2, 2: 3 };
-            sendInput({ type: 'mousedown', button: buttonMap[e.button] || 1 });
-        });
-
-        canvas.addEventListener('mouseup', (e) => {
-            const buttonMap = { 0: 1, 1: 2, 2: 3 };
-            sendInput({ type: 'mouseup', button: buttonMap[e.button] || 1 });
-        });
-
-        // Prevent standard right-click context menu over the desktop canvas
-        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-
-        // Keyboard event interception
-        window.addEventListener('keydown', (e) => {
-            // Capture events only if focusing canvas
-            if (document.activeElement === canvas || document.activeElement === document.body) {
-                // Prevent browser standard shortcuts (e.g., Ctrl+S, Tab navigation)
-                e.preventDefault();
-                sendInput({ type: 'keydown', key: e.key });
+            for (const entry of entries) {
+                const targetVirtualPath = currentPath + (currentPath === "/" ? "" : "/") + entry.name;
+                
+                if (entry.isFile) {
+                    const fileData = await new Promise((resolve) => entry.file(resolve));
+                    const arrayBuffer = await fileData.arrayBuffer();
+                    const uint8View = new Uint8Array(arrayBuffer);
+                    
+                    // Map directly into the virtual file system instance
+                    pyodideInstance.FS.writeFile(targetVirtualPath, uint8View);
+                    outputConsole.textContent += `[Loaded Asset]: ${targetVirtualPath}\n`;
+                } else if (entry.isDirectory) {
+                    // Replicate subdirectory folders inside the engine
+                    try {
+                        pyodideInstance.FS.mkdir(targetVirtualPath);
+                    } catch(e){}
+                    await scanAndInjectDirectory(entry, targetVirtualPath);
+                }
             }
-        });
+        }
 
-        // Request System Keyboard Lock API (Chromium-based browsers)
-        canvas.addEventListener('click', () => {
-            if ('keyboard' in navigator && 'lock' in navigator.keyboard) {
-                navigator.keyboard.lock(["ControlLeft", "KeyW", "Tab", "AltLeft"]).catch(console.error);
+        // 4. Trigger Execution 
+        async function runPythonExecution() {
+            statusLabel.innerText = "Running script context...";
+            try {
+                // Assert entrypoint constraint check
+                if (!pyodideInstance.FS.readdir('/').includes('main.py')) {
+                    throw new Error("Missing entry file: Target directory must include a 'main.py' script file.");
+                }
+
+                outputConsole.textContent += "\n--- RUNTIME OUTPUT START ---\n";
+                
+                // Execute target mapping execution path
+                await pyodideInstance.runPythonAsync(`
+                    import os
+                    with open("main.py", "r") as f:
+                        code_to_exec = f.read()
+                    exec(code_to_exec, {})
+                `);
+                
+                statusLabel.innerText = "Execution completed successfully.";
+            } catch (error) {
+                outputConsole.textContent += `\n[RUNTIME EXCEPTION]: ${error.message}\n`;
+                statusLabel.innerText = "Execution halted due to errors.";
             }
-        });
+        }
+
+        // Kick off initialization sequence
+        initSandboxEngine();
     </script>
 </body>
 </html>
